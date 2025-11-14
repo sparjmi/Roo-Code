@@ -1,0 +1,22 @@
+{
+  "name": "@roo-code/solarwinds-neo4j",
+  "version": "1.0.0",
+  "description": "SolarWinds NPM to Neo4j network topology integration",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "neo4j-driver": "^5.26.0",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.4.5"
+  }
+}

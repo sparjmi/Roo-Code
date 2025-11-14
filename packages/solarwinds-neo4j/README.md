@@ -1,0 +1,275 @@
+# SolarWinds NPM to Neo4j Network Topology Integration
+
+This package provides a complete solution for querying SolarWinds Network Performance Monitor (NPM) API and building a network topology map in a Neo4j graph database.
+
+## Features
+
+- **SolarWinds NPM API Client**: Query network devices, interfaces, connections, and IP addresses using SWQL (SolarWinds Query Language)
+- **Neo4j Graph Database Integration**: Transform network data into an intuitive graph structure
+- **Automated Topology Mapping**: Automatically create relationships between devices, interfaces, and IP addresses
+- **Subnet Discovery**: Automatically identify and create subnet nodes based on IP address and subnet mask
+- **Performance Optimized**: Uses batch operations and indexes for efficient data loading
+
+## Graph Schema
+
+The integration creates the following graph structure:
+
+### Nodes
+
+- **Device**: Network devices (routers, switches, servers, etc.)
+  - Properties: `nodeId`, `name`, `ipAddress`, `vendor`, `machineType`, `location`, `status`, etc.
+
+- **Interface**: Network interfaces on devices
+  - Properties: `interfaceId`, `name`, `macAddress`, `adminStatus`, `operStatus`, `speed`, `mtu`, etc.
+
+- **IPAddress**: IP addresses assigned to interfaces
+  - Properties: `address`, `subnetMask`, `ipAddressType`
+
+- **Subnet**: Network subnets
+  - Properties: `network`, `networkAddress`, `cidr`
+
+### Relationships
+
+- **HAS_INTERFACE**: `(Device)-[:HAS_INTERFACE]->(Interface)`
+- **HAS_IP**: `(Interface)-[:HAS_IP]->(IPAddress)`
+- **BELONGS_TO_SUBNET**: `(IPAddress)-[:BELONGS_TO_SUBNET]->(Subnet)`
+- **CONNECTED_TO**: `(Interface)-[:CONNECTED_TO]->(Interface)` - Physical network connections
+
+## Prerequisites
+
+1. **SolarWinds NPM Instance**: Access to a SolarWinds NPM installation with API access
+2. **Neo4j Database**: A running Neo4j instance (4.x or 5.x)
+3. **Node.js**: Version 20.x or higher
+
+## Installation
+
+1. Navigate to the package directory:
+   ```bash
+   cd packages/solarwinds-neo4j
+   ```
+
+2. Install dependencies:
+   ```bash
+   pnpm install
+   ```
+
+3. Create a `.env` file from the example:
+   ```bash
+   cp .env.example .env
+   ```
+
+4. Configure your credentials in `.env`:
+   ```env
+   # SolarWinds NPM Configuration
+   SOLARWINDS_URL=https://your-solarwinds-server.com
+   SOLARWINDS_USERNAME=your_username
+   SOLARWINDS_PASSWORD=your_password
+   SOLARWINDS_VERIFY_SSL=true
+
+   # Neo4j Configuration
+   NEO4J_URI=bolt://localhost:7687
+   NEO4J_USERNAME=neo4j
+   NEO4J_PASSWORD=your_neo4j_password
+   NEO4J_DATABASE=neo4j
+
+   # Options
+   CLEAR_EXISTING=false  # Set to 'true' to clear existing topology data before import
+   ```
+
+## Usage
+
+### Quick Start
+
+Run the topology sync:
+
+```bash
+pnpm dev
+```
+
+Or build and run the compiled version:
+
+```bash
+pnpm build
+pnpm start
+```
+
+### As a Library
+
+You can also use this as a library in your own code:
+
+```typescript
+import { SolarWindsClient, Neo4jLoader } from '@roo-code/solarwinds-neo4j';
+
+const swClient = new SolarWindsClient({
+  baseUrl: 'https://your-solarwinds-server.com',
+  username: 'your_username',
+  password: 'your_password',
+  verifySSL: true,
+});
+
+const neo4jLoader = new Neo4jLoader({
+  uri: 'bolt://localhost:7687',
+  username: 'neo4j',
+  password: 'your_password',
+  database: 'neo4j',
+});
+
+// Fetch and load data
+const topologyData = await swClient.getAllTopologyData();
+await neo4jLoader.loadDevices(topologyData.nodes);
+await neo4jLoader.loadInterfaces(topologyData.interfaces);
+await neo4jLoader.loadConnections(topologyData.connections);
+```
+
+## Example Cypher Queries
+
+Once your topology is loaded, you can query it using Cypher. Here are some examples:
+
+### Find all devices
+```cypher
+MATCH (d:Device)
+RETURN d.name, d.ipAddress, d.vendor, d.status
+LIMIT 25
+```
+
+### Find network path between two devices
+```cypher
+MATCH path = shortestPath(
+  (d1:Device {name: 'Router1'})-[:HAS_INTERFACE|CONNECTED_TO*]-(d2:Device {name: 'Router2'})
+)
+RETURN path
+```
+
+### Find all devices connected to a specific device
+```cypher
+MATCH (d1:Device {name: 'CoreSwitch'})-[:HAS_INTERFACE]->(i1:Interface)
+      -[:CONNECTED_TO]-(i2:Interface)<-[:HAS_INTERFACE]-(d2:Device)
+RETURN DISTINCT d2.name, d2.ipAddress, d2.status
+```
+
+### Find all interfaces on a device with their IPs
+```cypher
+MATCH (d:Device {name: 'Router1'})-[:HAS_INTERFACE]->(i:Interface)
+      -[:HAS_IP]->(ip:IPAddress)
+RETURN i.name, ip.address, ip.subnetMask, i.operStatus
+```
+
+### Find all devices in a specific subnet
+```cypher
+MATCH (s:Subnet {network: '192.168.1.0/24'})<-[:BELONGS_TO_SUBNET]-(ip:IPAddress)
+      <-[:HAS_IP]-(i:Interface)<-[:HAS_INTERFACE]-(d:Device)
+RETURN DISTINCT d.name, d.ipAddress, d.status
+```
+
+### Identify devices with down interfaces
+```cypher
+MATCH (d:Device)-[:HAS_INTERFACE]->(i:Interface)
+WHERE i.operStatus <> 1
+RETURN d.name, i.name, i.operStatus
+ORDER BY d.name
+```
+
+### Find network topology visualization
+```cypher
+MATCH (d:Device)-[:HAS_INTERFACE]->(i:Interface)-[:CONNECTED_TO]-(i2:Interface)
+      <-[:HAS_INTERFACE]-(d2:Device)
+RETURN d, i, i2, d2
+LIMIT 100
+```
+
+## Architecture
+
+### SolarWindsClient
+
+The `SolarWindsClient` class handles all communication with the SolarWinds NPM API using the SWIS (SolarWinds Information Service) REST API. It supports:
+
+- SWQL query execution
+- Fetching nodes (devices)
+- Fetching interfaces
+- Fetching network connections
+- Fetching IP addresses
+- Connection testing
+
+### Neo4jLoader
+
+The `Neo4jLoader` class manages all Neo4j operations:
+
+- Creating indexes for performance
+- Loading devices, interfaces, and IP addresses
+- Creating network connections
+- Automatically discovering and creating subnets
+- Batch operations for efficient data loading
+- Transaction management
+
+## Configuration Options
+
+### Environment Variables
+
+- `SOLARWINDS_URL`: Base URL of your SolarWinds server (required)
+- `SOLARWINDS_USERNAME`: SolarWinds username (required)
+- `SOLARWINDS_PASSWORD`: SolarWinds password (required)
+- `SOLARWINDS_VERIFY_SSL`: Whether to verify SSL certificates (default: true)
+- `NEO4J_URI`: Neo4j connection URI (required)
+- `NEO4J_USERNAME`: Neo4j username (required)
+- `NEO4J_PASSWORD`: Neo4j password (required)
+- `NEO4J_DATABASE`: Neo4j database name (default: neo4j)
+- `CLEAR_EXISTING`: Clear existing topology data before import (default: false)
+
+## Troubleshooting
+
+### SolarWinds Connection Issues
+
+1. **SSL Certificate Errors**: Set `SOLARWINDS_VERIFY_SSL=false` for self-signed certificates
+2. **Authentication Failures**: Verify username and password, ensure the account has API access
+3. **Network Errors**: Check firewall settings and network connectivity
+
+### Neo4j Connection Issues
+
+1. **Connection Refused**: Ensure Neo4j is running and the URI is correct
+2. **Authentication Failed**: Verify Neo4j credentials
+3. **Database Not Found**: Check the database name, create it if necessary
+
+### Performance Considerations
+
+- For large networks (>10,000 devices), consider running the sync during off-peak hours
+- The script uses batch operations, but very large datasets may take time
+- Consider increasing Neo4j heap size for large topologies
+
+## Development
+
+### Build
+
+```bash
+pnpm build
+```
+
+### Run in Development Mode
+
+```bash
+pnpm dev
+```
+
+### File Structure
+
+```
+src/
+├── index.ts              # Main orchestration script
+├── solarwinds-client.ts  # SolarWinds API client
+├── neo4j-loader.ts       # Neo4j data loader
+└── types.ts              # TypeScript type definitions
+```
+
+## License
+
+See the root LICENSE file for license information.
+
+## Contributing
+
+Contributions are welcome! Please follow the existing code style and include tests for new features.
+
+## Support
+
+For issues and questions:
+- Check the SolarWinds API documentation
+- Review Neo4j Cypher documentation
+- Open an issue in the repository
