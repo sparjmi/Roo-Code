@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -e
 
 # AI Chat Platform Deployment Script
@@ -8,6 +8,13 @@ ENVIRONMENT=${1:-production}
 PROJECT_ID=${GCP_PROJECT_ID:-""}
 REGION=${GCP_REGION:-"us-central1"}
 CLUSTER_NAME="ai-chat-platform-gke"
+
+# Get script directory to ensure we're in the right place
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Change to project root
+cd "$PROJECT_ROOT"
 
 # Colors for output
 RED='\033[0;31m'
@@ -84,7 +91,7 @@ deploy_infrastructure() {
 
     echo_info "Infrastructure deployment complete!"
 
-    cd ../..
+    cd "$PROJECT_ROOT"
 }
 
 # Build and push Docker images
@@ -198,6 +205,7 @@ verify_deployment() {
 # Main deployment flow
 main() {
     echo_info "Starting deployment for environment: $ENVIRONMENT"
+    echo_info "Working directory: $PROJECT_ROOT"
 
     check_prerequisites
     authenticate_gcp
