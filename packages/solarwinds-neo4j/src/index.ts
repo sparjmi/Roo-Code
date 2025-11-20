@@ -30,6 +30,7 @@ function loadConfig(): AppConfig {
       username: process.env.SOLARWINDS_USERNAME!,
       password: process.env.SOLARWINDS_PASSWORD!,
       verifySSL: process.env.SOLARWINDS_VERIFY_SSL !== 'false',
+      certificatePath: process.env.SOLARWINDS_CERT_PATH,
     },
     neo4j: {
       uri: process.env.NEO4J_URI!,

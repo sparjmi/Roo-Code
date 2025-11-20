@@ -1,5 +1,6 @@
 import axios, { AxiosInstance } from 'axios';
 import https from 'https';
+import fs from 'fs';
 import {
   SolarWindsConfig,
   SolarWindsNode,
@@ -13,6 +14,12 @@ import {
  *
  * This client uses the SolarWinds Information Service (SWIS) API to query
  * network performance monitoring data.
+ *
+ * IMPORTANT: SolarWinds Platform 2025.2+ enforces SSL certificate validation by default.
+ * If using self-signed certificates, either:
+ * 1. Provide the CA certificate file path via certificatePath config
+ * 2. Set verifySSL to false (not recommended for production)
+ * 3. Use a properly signed certificate on your SolarWinds server
  */
 export class SolarWindsClient {
   private client: AxiosInstance;
@@ -21,9 +28,25 @@ export class SolarWindsClient {
   constructor(config: SolarWindsConfig) {
     this.config = config;
 
-    const httpsAgent = new https.Agent({
+    // Configure HTTPS agent for SSL/TLS
+    const httpsAgentOptions: https.AgentOptions = {
       rejectUnauthorized: config.verifySSL !== false,
-    });
+    };
+
+    // If a certificate path is provided, load it for SSL verification
+    // This is especially important for SolarWinds 2025.2+ with self-signed certs
+    if (config.certificatePath) {
+      try {
+        const ca = fs.readFileSync(config.certificatePath);
+        httpsAgentOptions.ca = ca;
+        console.log(`Loaded SSL certificate from: ${config.certificatePath}`);
+      } catch (error) {
+        console.warn(`Warning: Could not load certificate from ${config.certificatePath}:`, error);
+        throw new Error(`Failed to load SSL certificate: ${error}`);
+      }
+    }
+
+    const httpsAgent = new https.Agent(httpsAgentOptions);
 
     this.client = axios.create({
       baseURL: `${config.baseUrl}/SolarWinds/InformationService/v3/Json`,

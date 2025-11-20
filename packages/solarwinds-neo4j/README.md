@@ -41,6 +41,54 @@ The integration creates the following graph structure:
 2. **Neo4j Database**: A running Neo4j instance (4.x or 5.x)
 3. **Node.js**: Version 20.x or higher
 
+## SolarWinds NPM 2025.2+ Compatibility
+
+This integration is **fully compatible with SolarWinds NPM 2025.2.1** and later versions.
+
+### Important SSL/TLS Changes in 2025.2+
+
+Starting with **SolarWinds Platform 2025.2**, SSL certificate validation is **enforced by default** for all HTTPS connections to the SWIS API. This is a security improvement but requires proper configuration:
+
+#### Option 1: Use a Valid SSL Certificate (Recommended)
+
+Configure your SolarWinds server with a valid SSL certificate from a trusted Certificate Authority (CA) with:
+- Matching Common Name (CN) or Subject Alternative Name (SAN)
+- Complete certificate chain
+- Valid expiration date
+
+#### Option 2: Provide Self-Signed Certificate Path
+
+If using a self-signed certificate, export the CA certificate from your SolarWinds server and provide the path:
+
+```bash
+# Export certificate from SolarWinds (on Windows server)
+# Method 1: Using PowerShell
+$cert = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object {$_.Subject -like "*YourSolarWindsServer*"}
+Export-Certificate -Cert $cert -FilePath C:\solarwinds-cert.cer
+
+# Method 2: Using MMC (Certificate Manager)
+# 1. Run mmc.exe -> Add/Remove Snap-in -> Certificates -> Computer Account
+# 2. Navigate to Personal -> Certificates
+# 3. Right-click the SolarWinds certificate -> All Tasks -> Export
+# 4. Export as Base-64 encoded X.509 (.CER)
+```
+
+Then configure the certificate path in your `.env` file:
+```env
+SOLARWINDS_CERT_PATH=/path/to/solarwinds-cert.pem
+```
+
+**📖 For detailed certificate export instructions, see [SSL-CERTIFICATE-GUIDE.md](./SSL-CERTIFICATE-GUIDE.md)**
+
+#### Option 3: Disable SSL Verification (Not Recommended for Production)
+
+For testing or development environments only:
+```env
+SOLARWINDS_VERIFY_SSL=false
+```
+
+**⚠️ Warning**: Disabling SSL verification in production environments exposes you to man-in-the-middle attacks.
+
 ## Installation
 
 1. Navigate to the package directory:
@@ -65,6 +113,10 @@ The integration creates the following graph structure:
    SOLARWINDS_USERNAME=your_username
    SOLARWINDS_PASSWORD=your_password
    SOLARWINDS_VERIFY_SSL=true
+
+   # SSL Certificate Configuration (for SolarWinds 2025.2+)
+   # If using self-signed certificates, provide the path to the CA certificate file
+   # SOLARWINDS_CERT_PATH=/path/to/solarwinds-ca-cert.pem
 
    # Neo4j Configuration
    NEO4J_URI=bolt://localhost:7687
@@ -209,6 +261,7 @@ The `Neo4jLoader` class manages all Neo4j operations:
 - `SOLARWINDS_USERNAME`: SolarWinds username (required)
 - `SOLARWINDS_PASSWORD`: SolarWinds password (required)
 - `SOLARWINDS_VERIFY_SSL`: Whether to verify SSL certificates (default: true)
+- `SOLARWINDS_CERT_PATH`: Path to CA certificate file for SSL verification (optional, required for self-signed certs in 2025.2+)
 - `NEO4J_URI`: Neo4j connection URI (required)
 - `NEO4J_USERNAME`: Neo4j username (required)
 - `NEO4J_PASSWORD`: Neo4j password (required)
@@ -219,9 +272,29 @@ The `Neo4jLoader` class manages all Neo4j operations:
 
 ### SolarWinds Connection Issues
 
-1. **SSL Certificate Errors**: Set `SOLARWINDS_VERIFY_SSL=false` for self-signed certificates
+1. **SSL Certificate Errors (SolarWinds 2025.2.1+)**:
+
+   **Error**: `unable to verify the first certificate` or `self signed certificate`
+
+   **Solutions**:
+   - **Best Practice**: Provide the CA certificate file path via `SOLARWINDS_CERT_PATH` environment variable
+   - **Quick Fix**: Set `SOLARWINDS_VERIFY_SSL=false` (not recommended for production)
+   - **Permanent Solution**: Install a valid SSL certificate on your SolarWinds server
+
+   **To export the SolarWinds certificate**:
+   ```bash
+   # On Windows (PowerShell)
+   $cert = Get-ChildItem -Path Cert:\LocalMachine\My | Where-Object {$_.Subject -like "*your-solarwinds-server*"}
+   Export-Certificate -Cert $cert -FilePath C:\solarwinds-cert.cer
+
+   # Convert to PEM format (if needed)
+   openssl x509 -inform DER -in solarwinds-cert.cer -out solarwinds-cert.pem
+   ```
+
+   Then set: `SOLARWINDS_CERT_PATH=/path/to/solarwinds-cert.pem`
+
 2. **Authentication Failures**: Verify username and password, ensure the account has API access
-3. **Network Errors**: Check firewall settings and network connectivity
+3. **Network Errors**: Check firewall settings and network connectivity (SWIS API typically uses port 17778 or 17774)
 
 ### Neo4j Connection Issues
 

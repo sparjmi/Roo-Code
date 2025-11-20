@@ -106,6 +106,7 @@ export interface SolarWindsConfig {
   username: string;
   password: string;
   verifySSL?: boolean;
+  certificatePath?: string; // Path to CA certificate file for SSL verification (SolarWinds 2025.2+)
 }
 
 export interface Neo4jConfig {
