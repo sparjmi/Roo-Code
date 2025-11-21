@@ -139,19 +139,100 @@ export class SolarWindsClient {
   /**
    * Fetch network connections (topology links)
    * This uses the Neighbor Discovery data from NPM
+   *
+   * Tries multiple entity names for compatibility across SolarWinds versions:
+   * 1. Orion.Topology.InterfaceNeighbors (newer versions)
+   * 2. Orion.NPM.InterfaceNeighbors (older versions)
+   * 3. CDP/LLDP tables as fallback
    */
   async getConnections(): Promise<SolarWindsConnection[]> {
-    const swql = `
-      SELECT
-        LocalNodeID,
-        LocalInterfaceID,
-        RemoteNodeID,
-        RemoteInterfaceID,
-        ConnectionType
-      FROM Orion.NPM.InterfaceNeighbors
-    `;
+    // Try different entity names in order of preference
+    const entityQueries = [
+      // Modern versions (2024.x+) use Orion.Topology namespace
+      {
+        name: 'Orion.Topology.InterfaceNeighbors',
+        swql: `
+          SELECT
+            LocalNode.NodeID AS LocalNodeID,
+            LocalInterface.InterfaceID AS LocalInterfaceID,
+            RemoteNode.NodeID AS RemoteNodeID,
+            RemoteInterface.InterfaceID AS RemoteInterfaceID,
+            Protocol AS ConnectionType
+          FROM Orion.Topology.InterfaceNeighbors
+          WHERE LocalNode.NodeID IS NOT NULL
+            AND RemoteNode.NodeID IS NOT NULL
+        `,
+      },
+      // Older versions
+      {
+        name: 'Orion.NPM.InterfaceNeighbors',
+        swql: `
+          SELECT
+            LocalNodeID,
+            LocalInterfaceID,
+            RemoteNodeID,
+            RemoteInterfaceID,
+            ConnectionType
+          FROM Orion.NPM.InterfaceNeighbors
+        `,
+      },
+      // CDP (Cisco Discovery Protocol) fallback
+      {
+        name: 'Orion.NPM.CDPNeighbors',
+        swql: `
+          SELECT
+            LocalNode.NodeID AS LocalNodeID,
+            LocalInterface.InterfaceID AS LocalInterfaceID,
+            RemoteNode.NodeID AS RemoteNodeID,
+            RemoteInterface.InterfaceID AS RemoteInterfaceID,
+            'CDP' AS ConnectionType
+          FROM Orion.NPM.CDPNeighbors
+          WHERE LocalNode.NodeID IS NOT NULL
+            AND RemoteNode.NodeID IS NOT NULL
+        `,
+      },
+      // LLDP (Link Layer Discovery Protocol) fallback
+      {
+        name: 'Orion.NPM.LLDPNeighbors',
+        swql: `
+          SELECT
+            LocalNode.NodeID AS LocalNodeID,
+            LocalInterface.InterfaceID AS LocalInterfaceID,
+            RemoteNode.NodeID AS RemoteNodeID,
+            RemoteInterface.InterfaceID AS RemoteInterfaceID,
+            'LLDP' AS ConnectionType
+          FROM Orion.NPM.LLDPNeighbors
+          WHERE LocalNode.NodeID IS NOT NULL
+            AND RemoteNode.NodeID IS NOT NULL
+        `,
+      },
+    ];
 
-    return this.query<SolarWindsConnection>(swql);
+    // Try each query until one succeeds
+    for (const { name, swql } of entityQueries) {
+      try {
+        console.log(`Trying to fetch connections from ${name}...`);
+        const results = await this.query<SolarWindsConnection>(swql);
+        if (results.length > 0) {
+          console.log(`Successfully fetched ${results.length} connections from ${name}`);
+          return results;
+        }
+        console.log(`${name} returned no results, trying next option...`);
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 400) {
+          console.log(`${name} not available in this SolarWinds instance, trying next option...`);
+          continue;
+        }
+        // Re-throw non-404 errors
+        throw error;
+      }
+    }
+
+    // If all queries fail, return empty array and log warning
+    console.warn('Warning: Could not fetch network connections from any available entity.');
+    console.warn('Your SolarWinds instance may not have topology discovery enabled (CDP/LLDP).');
+    console.warn('The topology will still include devices and interfaces, but without connection relationships.');
+    return [];
   }
 
   /**
@@ -211,5 +292,34 @@ export class SolarWindsClient {
       console.error('Connection test failed:', error);
       return false;
     }
+  }
+
+  /**
+   * Discover available topology entities in the SolarWinds instance
+   * Useful for troubleshooting and determining what data sources are available
+   */
+  async discoverTopologyEntities(): Promise<string[]> {
+    const entitiesToCheck = [
+      'Orion.Topology.InterfaceNeighbors',
+      'Orion.NPM.InterfaceNeighbors',
+      'Orion.NPM.CDPNeighbors',
+      'Orion.NPM.LLDPNeighbors',
+      'Orion.NPM.Interfaces',
+      'Orion.NPM.IPAddresses',
+      'Orion.Nodes',
+    ];
+
+    const available: string[] = [];
+
+    for (const entity of entitiesToCheck) {
+      try {
+        await this.query(`SELECT TOP 1 * FROM ${entity}`);
+        available.push(entity);
+      } catch (error) {
+        // Entity not available
+      }
+    }
+
+    return available;
   }
 }

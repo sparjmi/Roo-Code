@@ -248,6 +248,11 @@ export class Neo4jLoader {
    * Load network connections (topology links)
    */
   async loadConnections(connections: SolarWindsConnection[]): Promise<void> {
+    if (connections.length === 0) {
+      console.log('No connections to load (topology discovery may not be enabled)');
+      return;
+    }
+
     const session = this.driver.session({
       database: this.config.database || 'neo4j',
     });

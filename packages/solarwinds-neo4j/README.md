@@ -130,6 +130,20 @@ SOLARWINDS_VERIFY_SSL=false
 
 ## Usage
 
+### Troubleshooting (Recommended First Step)
+
+Before running the full sync, it's recommended to run the troubleshooting script to verify your configuration and discover available entities:
+
+```bash
+pnpm troubleshoot
+```
+
+This will:
+- Test your SolarWinds connection
+- Discover available topology entities in your instance
+- Test data retrieval for nodes, interfaces, connections, and IP addresses
+- Provide recommendations for configuration
+
 ### Quick Start
 
 Run the topology sync:
@@ -293,8 +307,27 @@ The `Neo4jLoader` class manages all Neo4j operations:
 
    Then set: `SOLARWINDS_CERT_PATH=/path/to/solarwinds-cert.pem`
 
-2. **Authentication Failures**: Verify username and password, ensure the account has API access
-3. **Network Errors**: Check firewall settings and network connectivity (SWIS API typically uses port 17778 or 17774)
+2. **"Entity not found" errors for topology tables**:
+
+   **Error**: `Source entity [Orion.NPM.InterfaceNeighbors] not found in catalog`
+
+   **Cause**: The topology entity name varies by SolarWinds version and configuration. The integration automatically tries multiple entity names.
+
+   **Solutions**:
+   - Run `pnpm troubleshoot` to discover which topology entities are available in your instance
+   - The integration will automatically try these entities in order:
+     1. `Orion.Topology.InterfaceNeighbors` (newer versions)
+     2. `Orion.NPM.InterfaceNeighbors` (older versions)
+     3. `Orion.NPM.CDPNeighbors` (Cisco Discovery Protocol)
+     4. `Orion.NPM.LLDPNeighbors` (Link Layer Discovery Protocol)
+   - If none are available, the sync will continue without connection data (you'll still get devices and interfaces)
+   - To enable topology discovery:
+     - Enable CDP or LLDP on your network devices
+     - Configure SolarWinds NPM to discover Layer 2 topology
+     - Wait for the next discovery poll to complete
+
+3. **Authentication Failures**: Verify username and password, ensure the account has API access
+4. **Network Errors**: Check firewall settings and network connectivity (SWIS API typically uses port 17778 or 17774)
 
 ### Neo4j Connection Issues
 
