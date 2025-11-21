@@ -365,23 +365,24 @@ export class SolarWindsClient {
    * Useful for troubleshooting and determining what data sources are available
    */
   async discoverTopologyEntities(): Promise<string[]> {
+    // Map entities to specific column queries (SWQL doesn't support SELECT * in some versions)
     const entitiesToCheck = [
-      'Orion.Nodes',
-      'Orion.NPM.Interfaces',
-      'Orion.NPM.IPAddresses',
-      'Orion.IPAM.IPNode',
-      'Orion.Topology.InterfaceNeighbors',
-      'Orion.NPM.InterfaceNeighbors',
-      'Orion.NPM.CDPNeighbors',
-      'Orion.NPM.LLDPNeighbors',
+      { name: 'Orion.Nodes', query: 'SELECT TOP 1 NodeID FROM Orion.Nodes' },
+      { name: 'Orion.NPM.Interfaces', query: 'SELECT TOP 1 InterfaceID FROM Orion.NPM.Interfaces' },
+      { name: 'Orion.NPM.IPAddresses', query: 'SELECT TOP 1 IPAddressID FROM Orion.NPM.IPAddresses' },
+      { name: 'Orion.IPAM.IPNode', query: 'SELECT TOP 1 IPNodeID FROM Orion.IPAM.IPNode' },
+      { name: 'Orion.Topology.InterfaceNeighbors', query: 'SELECT TOP 1 LocalNode.NodeID FROM Orion.Topology.InterfaceNeighbors' },
+      { name: 'Orion.NPM.InterfaceNeighbors', query: 'SELECT TOP 1 LocalNodeID FROM Orion.NPM.InterfaceNeighbors' },
+      { name: 'Orion.NPM.CDPNeighbors', query: 'SELECT TOP 1 LocalNode.NodeID FROM Orion.NPM.CDPNeighbors' },
+      { name: 'Orion.NPM.LLDPNeighbors', query: 'SELECT TOP 1 LocalNode.NodeID FROM Orion.NPM.LLDPNeighbors' },
     ];
 
     const available: string[] = [];
 
-    for (const entity of entitiesToCheck) {
+    for (const { name, query } of entitiesToCheck) {
       try {
-        await this.query(`SELECT TOP 1 * FROM ${entity}`);
-        available.push(entity);
+        await this.query(query);
+        available.push(name);
       } catch (error) {
         // Entity not available
       }

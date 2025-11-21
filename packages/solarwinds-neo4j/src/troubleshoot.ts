@@ -117,12 +117,18 @@ async function troubleshoot() {
   try {
     console.log('\n   Testing IP Addresses...');
     const ipAddresses = await client.getIPAddresses();
-    console.log(`   ✓ Fetched ${ipAddresses.length} IP addresses`);
     if (ipAddresses.length > 0) {
+      console.log(`   ✓ Fetched ${ipAddresses.length} IP addresses`);
       console.log(`   Example: ${ipAddresses[0].IPAddress} on Interface ${ipAddresses[0].InterfaceID}`);
+    } else {
+      console.log('   ⚠️  No IP addresses found');
+      console.log('   IP address entities may not be available in this SolarWinds instance');
     }
   } catch (error) {
-    console.error('   ❌ Failed to fetch IP addresses:', error);
+    console.error('   ❌ Failed to fetch IP addresses');
+    if (error instanceof Error) {
+      console.error(`   Error: ${error.message}`);
+    }
   }
 
   // Recommendations
