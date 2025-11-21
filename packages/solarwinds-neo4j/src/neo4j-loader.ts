@@ -215,6 +215,11 @@ export class Neo4jLoader {
    * Load IP addresses and create relationships
    */
   async loadIPAddresses(ipAddresses: SolarWindsIPAddress[]): Promise<void> {
+    if (ipAddresses.length === 0) {
+      console.log('No IP addresses to load');
+      return;
+    }
+
     const session = this.driver.session({
       database: this.config.database || 'neo4j',
     });
@@ -290,6 +295,16 @@ export class Neo4jLoader {
     });
 
     try {
+      // Check if there are any IP addresses first
+      const countResult = await session.run('MATCH (ip:IPAddress) RETURN count(ip) as count');
+      const ipCount = countResult.records[0]?.get('count').toNumber() || 0;
+
+      if (ipCount === 0) {
+        console.log('No IP addresses available, skipping subnet creation');
+        await session.close();
+        return;
+      }
+
       console.log('Creating subnets from IP addresses...');
 
       // This creates subnets based on the subnet mask

@@ -239,19 +239,83 @@ export class SolarWindsClient {
 
   /**
    * Fetch IP addresses assigned to interfaces
+   *
+   * Tries multiple entity names for compatibility across SolarWinds versions:
+   * 1. Orion.NPM.IPAddresses (older versions)
+   * 2. Orion.IPAM.IPNode (if IPAM module is available)
+   * 3. Direct from interface properties as fallback
    */
   async getIPAddresses(): Promise<SolarWindsIPAddress[]> {
-    const swql = `
-      SELECT
-        IPAddressID,
-        InterfaceID,
-        IPAddress,
-        SubnetMask,
-        IPAddressType
-      FROM Orion.NPM.IPAddresses
-    `;
+    const entityQueries = [
+      // Traditional NPM IP addresses table
+      {
+        name: 'Orion.NPM.IPAddresses',
+        swql: `
+          SELECT
+            IPAddressID,
+            InterfaceID,
+            IPAddress,
+            SubnetMask,
+            IPAddressType
+          FROM Orion.NPM.IPAddresses
+        `,
+      },
+      // IPAM module (if available)
+      {
+        name: 'Orion.IPAM.IPNode',
+        swql: `
+          SELECT
+            I.IPNodeID AS IPAddressID,
+            I.InterfaceID,
+            I.IPAddress,
+            I.SubnetMask,
+            I.IPAddressType
+          FROM Orion.IPAM.IPNode I
+          WHERE I.InterfaceID IS NOT NULL
+        `,
+      },
+      // Fallback: Get IP from interfaces directly
+      {
+        name: 'Orion.NPM.Interfaces (IP fallback)',
+        swql: `
+          SELECT
+            InterfaceID AS IPAddressID,
+            InterfaceID,
+            IPAddress,
+            NULL AS SubnetMask,
+            'Interface' AS IPAddressType
+          FROM Orion.NPM.Interfaces
+          WHERE IPAddress IS NOT NULL
+            AND IPAddress != ''
+            AND IPAddress != '0.0.0.0'
+        `,
+      },
+    ];
 
-    return this.query<SolarWindsIPAddress>(swql);
+    // Try each query until one succeeds
+    for (const { name, swql } of entityQueries) {
+      try {
+        console.log(`Trying to fetch IP addresses from ${name}...`);
+        const results = await this.query<SolarWindsIPAddress>(swql);
+        if (results.length > 0) {
+          console.log(`Successfully fetched ${results.length} IP addresses from ${name}`);
+          return results;
+        }
+        console.log(`${name} returned no results, trying next option...`);
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 400) {
+          console.log(`${name} not available in this SolarWinds instance, trying next option...`);
+          continue;
+        }
+        // Re-throw non-400 errors
+        throw error;
+      }
+    }
+
+    // If all queries fail, return empty array and log warning
+    console.warn('Warning: Could not fetch IP addresses from any available entity.');
+    console.warn('The topology will still include devices and interfaces, but without IP address information.');
+    return [];
   }
 
   /**
@@ -302,13 +366,14 @@ export class SolarWindsClient {
    */
   async discoverTopologyEntities(): Promise<string[]> {
     const entitiesToCheck = [
+      'Orion.Nodes',
+      'Orion.NPM.Interfaces',
+      'Orion.NPM.IPAddresses',
+      'Orion.IPAM.IPNode',
       'Orion.Topology.InterfaceNeighbors',
       'Orion.NPM.InterfaceNeighbors',
       'Orion.NPM.CDPNeighbors',
       'Orion.NPM.LLDPNeighbors',
-      'Orion.NPM.Interfaces',
-      'Orion.NPM.IPAddresses',
-      'Orion.Nodes',
     ];
 
     const available: string[] = [];
