@@ -369,12 +369,17 @@ export class Neo4jLoader {
 
     try {
       const result = await session.run(`
+        MATCH (d:Device)
+        OPTIONAL MATCH (i:Interface)
+        OPTIONAL MATCH (ip:IPAddress)
+        OPTIONAL MATCH (s:Subnet)
+        OPTIONAL MATCH ()-[c:CONNECTED_TO]->()
         RETURN
-          size((n:Device)) AS devices,
-          size((n:Interface)) AS interfaces,
-          size((n:IPAddress)) AS ipAddresses,
-          size((n:Subnet)) AS subnets,
-          size(()-[:CONNECTED_TO]->()) AS connections
+          count(DISTINCT d) AS devices,
+          count(DISTINCT i) AS interfaces,
+          count(DISTINCT ip) AS ipAddresses,
+          count(DISTINCT s) AS subnets,
+          count(DISTINCT c) AS connections
       `);
 
       const record = result.records[0];
