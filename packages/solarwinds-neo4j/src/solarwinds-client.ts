@@ -74,7 +74,9 @@ export class SolarWindsClient {
     } catch (error) {
       if (axios.isAxiosError(error)) {
         console.error('SolarWinds API Error:', error.response?.data || error.message);
-        throw new Error(`SolarWinds API query failed: ${error.message}`);
+        // Re-throw the original axios error to preserve error properties
+        // This allows callers to check error.response.status
+        throw error;
       }
       throw error;
     }
