@@ -96,8 +96,10 @@ async function syncTopology() {
     console.log('\n--- Loading Data into PostgreSQL ---');
     await postgresLoader.loadDevices(topologyData.nodes);
     await postgresLoader.loadInterfaces(topologyData.interfaces);
-    await postgresLoader.loadIPAddresses(topologyData.ipAddresses);
-    await postgresLoader.loadConnections(topologyData.connections);
+    await postgresLoader.loadNodeIPAddresses(topologyData.ipAddresses);
+    await postgresLoader.loadL2Connections(topologyData.l2Connections);
+    await postgresLoader.loadCdpNeighbors(topologyData.cdpEntries);
+    await postgresLoader.loadLldpNeighbors(topologyData.lldpEntries);
 
     // Get and display statistics
     console.log('\n--- Topology Statistics ---');
@@ -105,7 +107,9 @@ async function syncTopology() {
     console.log(`Devices: ${stats.devices}`);
     console.log(`Interfaces: ${stats.interfaces}`);
     console.log(`IP Addresses: ${stats.ipAddresses}`);
-    console.log(`Connections: ${stats.connections}`);
+    console.log(`L2 Connections: ${stats.l2Connections}`);
+    console.log(`CDP Neighbors: ${stats.cdpNeighbors}`);
+    console.log(`LLDP Neighbors: ${stats.lldpNeighbors}`);
 
     console.log('\n✓ Topology sync completed successfully!');
   } catch (error) {

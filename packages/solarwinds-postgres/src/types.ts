@@ -47,11 +47,46 @@ export interface SolarWindsConnection {
 }
 
 export interface SolarWindsIPAddress {
-  IPAddressID: number;
-  InterfaceID: number;
+  NodeID: number;
   IPAddress: string;
+  IPAddressN: string;
   SubnetMask: string;
   IPAddressType: string;
+}
+
+export interface SolarWindsL2Connection {
+  ParentNodeID: number;
+  ChildNodeID: number;
+  ParentInterfaceID: number;
+  ChildInterfaceID: number;
+  ConnectionType?: string;
+}
+
+export interface SolarWindsCdpEntry {
+  NodeID: number;
+  InterfaceID: number;
+  RemoteDevice: string;
+  RemoteInterface: string;
+  RemoteIPAddress?: string;
+  RemotePlatform?: string;
+}
+
+export interface SolarWindsLldpEntry {
+  NodeID: number;
+  InterfaceID: number;
+  RemoteDevice: string;
+  RemoteInterface: string;
+  RemoteIPAddress?: string;
+  RemotePlatform?: string;
+}
+
+export interface TopologyData {
+  nodes: SolarWindsNode[];
+  interfaces: SolarWindsInterface[];
+  ipAddresses: SolarWindsIPAddress[];
+  l2Connections: SolarWindsL2Connection[];
+  cdpEntries: SolarWindsCdpEntry[];
+  lldpEntries: SolarWindsLldpEntry[];
 }
 
 /**

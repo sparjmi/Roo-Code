@@ -5,6 +5,9 @@ import {
   SolarWindsInterface,
   SolarWindsConnection,
   SolarWindsIPAddress,
+  SolarWindsL2Connection,
+  SolarWindsCdpEntry,
+  SolarWindsLldpEntry,
 } from './types';
 
 /**
@@ -67,8 +70,10 @@ export class PostgresLoader {
       await client.query('BEGIN');
 
       // Drop in order to respect foreign key constraints
-      await client.query('DROP TABLE IF EXISTS connections CASCADE');
-      await client.query('DROP TABLE IF EXISTS ip_addresses CASCADE');
+      await client.query('DROP TABLE IF EXISTS lldp_neighbors CASCADE');
+      await client.query('DROP TABLE IF EXISTS cdp_neighbors CASCADE');
+      await client.query('DROP TABLE IF EXISTS l2_connections CASCADE');
+      await client.query('DROP TABLE IF EXISTS node_ip_addresses CASCADE');
       await client.query('DROP TABLE IF EXISTS interfaces CASCADE');
       await client.query('DROP TABLE IF EXISTS devices CASCADE');
 
@@ -139,32 +144,67 @@ export class PostgresLoader {
         )
       `);
 
-      // Create ip_addresses table with foreign key to interfaces
+      // Create node_ip_addresses table with foreign key to devices
       await client.query(`
-        CREATE TABLE IF NOT EXISTS ip_addresses (
-          ip_address_id INTEGER PRIMARY KEY,
-          interface_id INTEGER NOT NULL,
+        CREATE TABLE IF NOT EXISTS node_ip_addresses (
+          node_id INTEGER NOT NULL,
           ip_address VARCHAR(100) NOT NULL,
+          ip_address_n VARCHAR(100),
           subnet_mask VARCHAR(100),
           ip_address_type VARCHAR(100),
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
+          PRIMARY KEY (node_id, ip_address)
+        )
+      `);
+
+      // Create l2_connections table with foreign keys to devices and interfaces
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS l2_connections (
+          connection_id SERIAL PRIMARY KEY,
+          parent_node_id INTEGER NOT NULL,
+          child_node_id INTEGER NOT NULL,
+          parent_interface_id INTEGER NOT NULL,
+          child_interface_id INTEGER NOT NULL,
+          connection_type VARCHAR(100),
+          last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (parent_node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
+          FOREIGN KEY (child_node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
+          FOREIGN KEY (parent_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,
+          FOREIGN KEY (child_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,
+          UNIQUE (parent_interface_id, child_interface_id)
+        )
+      `);
+
+      // Create cdp_neighbors table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS cdp_neighbors (
+          neighbor_id SERIAL PRIMARY KEY,
+          node_id INTEGER NOT NULL,
+          interface_id INTEGER NOT NULL,
+          remote_device VARCHAR(500),
+          remote_interface VARCHAR(500),
+          remote_ip_address VARCHAR(100),
+          remote_platform VARCHAR(500),
+          last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
           FOREIGN KEY (interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE
         )
       `);
 
-      // Create connections table with foreign keys to interfaces
+      // Create lldp_neighbors table
       await client.query(`
-        CREATE TABLE IF NOT EXISTS connections (
-          connection_id SERIAL PRIMARY KEY,
-          local_node_id INTEGER,
-          local_interface_id INTEGER NOT NULL,
-          remote_node_id INTEGER,
-          remote_interface_id INTEGER NOT NULL,
-          connection_type VARCHAR(100),
+        CREATE TABLE IF NOT EXISTS lldp_neighbors (
+          neighbor_id SERIAL PRIMARY KEY,
+          node_id INTEGER NOT NULL,
+          interface_id INTEGER NOT NULL,
+          remote_device VARCHAR(500),
+          remote_interface VARCHAR(500),
+          remote_ip_address VARCHAR(100),
+          remote_platform VARCHAR(500),
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (local_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,
-          FOREIGN KEY (remote_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,
-          UNIQUE (local_interface_id, remote_interface_id)
+          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
+          FOREIGN KEY (interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE
         )
       `);
 
@@ -174,10 +214,16 @@ export class PostgresLoader {
       await client.query('CREATE INDEX IF NOT EXISTS idx_devices_location ON devices(location)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_interfaces_node_id ON interfaces(node_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_interfaces_name ON interfaces(interface_name)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_ip_addresses_interface_id ON ip_addresses(interface_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_ip_addresses_ip ON ip_addresses(ip_address)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_connections_local_iface ON connections(local_interface_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_connections_remote_iface ON connections(remote_interface_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_node_ip_addresses_node_id ON node_ip_addresses(node_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_node_ip_addresses_ip ON node_ip_addresses(ip_address)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_l2_connections_parent ON l2_connections(parent_node_id, parent_interface_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_l2_connections_child ON l2_connections(child_node_id, child_interface_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_cdp_neighbors_node ON cdp_neighbors(node_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_cdp_neighbors_interface ON cdp_neighbors(interface_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_cdp_neighbors_remote_device ON cdp_neighbors(remote_device)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_lldp_neighbors_node ON lldp_neighbors(node_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_lldp_neighbors_interface ON lldp_neighbors(interface_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_lldp_neighbors_remote_device ON lldp_neighbors(remote_device)');
 
       await client.query('COMMIT');
       console.log('Tables created successfully');
@@ -364,7 +410,7 @@ export class PostgresLoader {
   /**
    * Load IP addresses into PostgreSQL
    */
-  async loadIPAddresses(ipAddresses: SolarWindsIPAddress[]): Promise<void> {
+  async loadNodeIPAddresses(ipAddresses: SolarWindsIPAddress[]): Promise<void> {
     if (ipAddresses.length === 0) {
       console.log('No IP addresses to load');
       return;
@@ -373,32 +419,31 @@ export class PostgresLoader {
     const client = await this.pool.connect();
 
     try {
-      console.log(`Loading ${ipAddresses.length} IP addresses...`);
+      console.log(`Loading ${ipAddresses.length} node IP addresses...`);
       await client.query('BEGIN');
 
       for (const ip of ipAddresses) {
         await client.query(
           `
-          INSERT INTO ip_addresses (
-            ip_address_id, interface_id, ip_address, subnet_mask,
+          INSERT INTO node_ip_addresses (
+            node_id, ip_address, ip_address_n, subnet_mask,
             ip_address_type, last_updated
           ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-          ON CONFLICT (ip_address_id) DO UPDATE SET
-            interface_id = EXCLUDED.interface_id,
-            ip_address = EXCLUDED.ip_address,
+          ON CONFLICT (node_id, ip_address) DO UPDATE SET
+            ip_address_n = EXCLUDED.ip_address_n,
             subnet_mask = EXCLUDED.subnet_mask,
             ip_address_type = EXCLUDED.ip_address_type,
             last_updated = CURRENT_TIMESTAMP
           `,
-          [ip.IPAddressID, ip.InterfaceID, ip.IPAddress, ip.SubnetMask, ip.IPAddressType]
+          [ip.NodeID, ip.IPAddress, ip.IPAddressN, ip.SubnetMask, ip.IPAddressType]
         );
       }
 
       await client.query('COMMIT');
-      console.log('IP addresses loaded successfully');
+      console.log('Node IP addresses loaded successfully');
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('Error loading IP addresses:', error);
+      console.error('Error loading node IP addresses:', error);
       throw error;
     } finally {
       client.release();
@@ -406,48 +451,140 @@ export class PostgresLoader {
   }
 
   /**
-   * Load network connections into PostgreSQL
+   * Load L2 connections into PostgreSQL
    */
-  async loadConnections(connections: SolarWindsConnection[]): Promise<void> {
+  async loadL2Connections(connections: SolarWindsL2Connection[]): Promise<void> {
     if (connections.length === 0) {
-      console.log('No connections to load (topology discovery may not be enabled)');
+      console.log('No L2 connections to load');
       return;
     }
 
     const client = await this.pool.connect();
 
     try {
-      console.log(`Loading ${connections.length} connections...`);
+      console.log(`Loading ${connections.length} L2 connections...`);
       await client.query('BEGIN');
 
       for (const conn of connections) {
         await client.query(
           `
-          INSERT INTO connections (
-            local_node_id, local_interface_id, remote_node_id,
-            remote_interface_id, connection_type, last_updated
+          INSERT INTO l2_connections (
+            parent_node_id, child_node_id, parent_interface_id,
+            child_interface_id, connection_type, last_updated
           ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-          ON CONFLICT (local_interface_id, remote_interface_id) DO UPDATE SET
-            local_node_id = EXCLUDED.local_node_id,
-            remote_node_id = EXCLUDED.remote_node_id,
+          ON CONFLICT (parent_interface_id, child_interface_id) DO UPDATE SET
+            parent_node_id = EXCLUDED.parent_node_id,
+            child_node_id = EXCLUDED.child_node_id,
             connection_type = EXCLUDED.connection_type,
             last_updated = CURRENT_TIMESTAMP
           `,
           [
-            conn.LocalNodeID,
-            conn.LocalInterfaceID,
-            conn.RemoteNodeID,
-            conn.RemoteInterfaceID,
+            conn.ParentNodeID,
+            conn.ChildNodeID,
+            conn.ParentInterfaceID,
+            conn.ChildInterfaceID,
             conn.ConnectionType,
           ]
         );
       }
 
       await client.query('COMMIT');
-      console.log('Connections loaded successfully');
+      console.log('L2 connections loaded successfully');
     } catch (error) {
       await client.query('ROLLBACK');
-      console.error('Error loading connections:', error);
+      console.error('Error loading L2 connections:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Load CDP neighbor entries into PostgreSQL
+   */
+  async loadCdpNeighbors(cdpEntries: SolarWindsCdpEntry[]): Promise<void> {
+    if (cdpEntries.length === 0) {
+      console.log('No CDP neighbors to load');
+      return;
+    }
+
+    const client = await this.pool.connect();
+
+    try {
+      console.log(`Loading ${cdpEntries.length} CDP neighbors...`);
+      await client.query('BEGIN');
+
+      for (const entry of cdpEntries) {
+        await client.query(
+          `
+          INSERT INTO cdp_neighbors (
+            node_id, interface_id, remote_device, remote_interface,
+            remote_ip_address, remote_platform, last_updated
+          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+          ON CONFLICT (neighbor_id) DO NOTHING
+          `,
+          [
+            entry.NodeID,
+            entry.InterfaceID,
+            entry.RemoteDevice,
+            entry.RemoteInterface,
+            entry.RemoteIPAddress,
+            entry.RemotePlatform,
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+      console.log('CDP neighbors loaded successfully');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error loading CDP neighbors:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Load LLDP neighbor entries into PostgreSQL
+   */
+  async loadLldpNeighbors(lldpEntries: SolarWindsLldpEntry[]): Promise<void> {
+    if (lldpEntries.length === 0) {
+      console.log('No LLDP neighbors to load');
+      return;
+    }
+
+    const client = await this.pool.connect();
+
+    try {
+      console.log(`Loading ${lldpEntries.length} LLDP neighbors...`);
+      await client.query('BEGIN');
+
+      for (const entry of lldpEntries) {
+        await client.query(
+          `
+          INSERT INTO lldp_neighbors (
+            node_id, interface_id, remote_device, remote_interface,
+            remote_ip_address, remote_platform, last_updated
+          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+          ON CONFLICT (neighbor_id) DO NOTHING
+          `,
+          [
+            entry.NodeID,
+            entry.InterfaceID,
+            entry.RemoteDevice,
+            entry.RemoteInterface,
+            entry.RemoteIPAddress,
+            entry.RemotePlatform,
+          ]
+        );
+      }
+
+      await client.query('COMMIT');
+      console.log('LLDP neighbors loaded successfully');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error loading LLDP neighbors:', error);
       throw error;
     } finally {
       client.release();
@@ -465,15 +602,19 @@ export class PostgresLoader {
         SELECT
           (SELECT COUNT(*) FROM devices) AS devices,
           (SELECT COUNT(*) FROM interfaces) AS interfaces,
-          (SELECT COUNT(*) FROM ip_addresses) AS ip_addresses,
-          (SELECT COUNT(*) FROM connections) AS connections
+          (SELECT COUNT(*) FROM node_ip_addresses) AS ip_addresses,
+          (SELECT COUNT(*) FROM l2_connections) AS l2_connections,
+          (SELECT COUNT(*) FROM cdp_neighbors) AS cdp_neighbors,
+          (SELECT COUNT(*) FROM lldp_neighbors) AS lldp_neighbors
       `);
 
       return {
         devices: parseInt(result.rows[0].devices),
         interfaces: parseInt(result.rows[0].interfaces),
         ipAddresses: parseInt(result.rows[0].ip_addresses),
-        connections: parseInt(result.rows[0].connections),
+        l2Connections: parseInt(result.rows[0].l2_connections),
+        cdpNeighbors: parseInt(result.rows[0].cdp_neighbors),
+        lldpNeighbors: parseInt(result.rows[0].lldp_neighbors),
       };
     } catch (error) {
       console.error('Error getting stats:', error);

@@ -7,6 +7,10 @@ import {
   SolarWindsInterface,
   SolarWindsConnection,
   SolarWindsIPAddress,
+  SolarWindsL2Connection,
+  SolarWindsCdpEntry,
+  SolarWindsLldpEntry,
+  TopologyData,
 } from './types';
 
 /**
@@ -319,9 +323,137 @@ export class SolarWindsClient {
   }
 
   /**
+   * Fetch IP addresses from Orion.NodeIPAddresses
+   * This is the correct table for SolarWinds 2025.2.1
+   */
+  async getNodeIPAddresses(): Promise<SolarWindsIPAddress[]> {
+    try {
+      console.log('Fetching IP addresses from Orion.NodeIPAddresses...');
+      const swql = `
+        SELECT
+          NodeID,
+          IPAddress,
+          IPAddressN,
+          SubnetMask,
+          IPAddressType
+        FROM Orion.NodeIPAddresses
+      `;
+      const results = await this.query<SolarWindsIPAddress>(swql);
+      console.log(`✓ Fetched ${results.length} IP addresses from Orion.NodeIPAddresses`);
+      return results;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 400) {
+        console.warn('Orion.NodeIPAddresses not available, trying fallback...');
+        // Fallback: Get IP addresses directly from Nodes table
+        try {
+          const swql = `
+            SELECT
+              NodeID,
+              IPAddress,
+              IPAddress AS IPAddressN,
+              '' AS SubnetMask,
+              IPAddressType
+            FROM Orion.Nodes
+            WHERE IPAddress IS NOT NULL
+          `;
+          const results = await this.query<SolarWindsIPAddress>(swql);
+          console.log(`✓ Fetched ${results.length} IP addresses from Orion.Nodes (fallback)`);
+          return results;
+        } catch (fallbackError) {
+          console.warn('Could not fetch IP addresses from any source');
+          return [];
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch Layer 2 connections from Orion.NodeL2Connections
+   */
+  async getL2Connections(): Promise<SolarWindsL2Connection[]> {
+    try {
+      console.log('Fetching L2 connections from Orion.NodeL2Connections...');
+      const swql = `
+        SELECT
+          ParentNodeID,
+          ChildNodeID,
+          ParentInterfaceID,
+          ChildInterfaceID
+        FROM Orion.NodeL2Connections
+      `;
+      const results = await this.query<SolarWindsL2Connection>(swql);
+      console.log(`✓ Fetched ${results.length} L2 connections`);
+      return results;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 400) {
+        console.warn('Orion.NodeL2Connections not available');
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch CDP neighbor entries
+   */
+  async getCdpEntries(): Promise<SolarWindsCdpEntry[]> {
+    try {
+      console.log('Fetching CDP entries from Orion.NodeCdpEntry...');
+      const swql = `
+        SELECT
+          NodeID,
+          InterfaceID,
+          RemoteDevice,
+          RemoteInterface,
+          RemoteIPAddress,
+          RemotePlatform
+        FROM Orion.NodeCdpEntry
+      `;
+      const results = await this.query<SolarWindsCdpEntry>(swql);
+      console.log(`✓ Fetched ${results.length} CDP entries`);
+      return results;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 400) {
+        console.warn('Orion.NodeCdpEntry not available');
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Fetch LLDP neighbor entries
+   */
+  async getLldpEntries(): Promise<SolarWindsLldpEntry[]> {
+    try {
+      console.log('Fetching LLDP entries from Orion.NodeLldpEntry...');
+      const swql = `
+        SELECT
+          NodeID,
+          InterfaceID,
+          RemoteDevice,
+          RemoteInterface,
+          RemoteIPAddress,
+          RemotePlatform
+        FROM Orion.NodeLldpEntry
+      `;
+      const results = await this.query<SolarWindsLldpEntry>(swql);
+      console.log(`✓ Fetched ${results.length} LLDP entries`);
+      return results;
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 400) {
+        console.warn('Orion.NodeLldpEntry not available');
+        return [];
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Fetch all topology data in one call
    */
-  async getAllTopologyData() {
+  async getAllTopologyData(): Promise<TopologyData> {
     console.log('Fetching nodes from SolarWinds...');
     const nodes = await this.getNodes();
     console.log(`Fetched ${nodes.length} nodes`);
@@ -330,19 +462,25 @@ export class SolarWindsClient {
     const interfaces = await this.getInterfaces();
     console.log(`Fetched ${interfaces.length} interfaces`);
 
-    console.log('Fetching connections from SolarWinds...');
-    const connections = await this.getConnections();
-    console.log(`Fetched ${connections.length} connections`);
+    // Fetch IP addresses from the correct table
+    const ipAddresses = await this.getNodeIPAddresses();
 
-    console.log('Fetching IP addresses from SolarWinds...');
-    const ipAddresses = await this.getIPAddresses();
-    console.log(`Fetched ${ipAddresses.length} IP addresses`);
+    // Fetch L2 connections
+    const l2Connections = await this.getL2Connections();
+
+    // Fetch CDP entries
+    const cdpEntries = await this.getCdpEntries();
+
+    // Fetch LLDP entries
+    const lldpEntries = await this.getLldpEntries();
 
     return {
       nodes,
       interfaces,
-      connections,
       ipAddresses,
+      l2Connections,
+      cdpEntries,
+      lldpEntries,
     };
   }
 
