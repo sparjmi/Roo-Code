@@ -158,21 +158,18 @@ export class PostgresLoader {
         )
       `);
 
-      // Create l2_connections table with foreign keys to devices and interfaces
+      // Create l2_connections table - MAC addresses seen on switch ports
       await client.query(`
         CREATE TABLE IF NOT EXISTS l2_connections (
           connection_id SERIAL PRIMARY KEY,
-          parent_node_id INTEGER NOT NULL,
-          child_node_id INTEGER NOT NULL,
-          parent_interface_id INTEGER NOT NULL,
-          child_interface_id INTEGER NOT NULL,
-          connection_type VARCHAR(100),
+          node_id INTEGER NOT NULL,
+          port_id INTEGER NOT NULL,
+          mac_address VARCHAR(50),
+          vlan_id INTEGER,
+          status INTEGER,
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (parent_node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
-          FOREIGN KEY (child_node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
-          FOREIGN KEY (parent_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,
-          FOREIGN KEY (child_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,
-          UNIQUE (parent_interface_id, child_interface_id)
+          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
+          UNIQUE (node_id, port_id, mac_address)
         )
       `);
 
@@ -181,14 +178,12 @@ export class PostgresLoader {
         CREATE TABLE IF NOT EXISTS cdp_neighbors (
           neighbor_id SERIAL PRIMARY KEY,
           node_id INTEGER NOT NULL,
-          interface_id INTEGER NOT NULL,
-          remote_device VARCHAR(500),
-          remote_interface VARCHAR(500),
-          remote_ip_address VARCHAR(100),
-          remote_platform VARCHAR(500),
+          if_index INTEGER NOT NULL,
+          device_id VARCHAR(500),
+          device_port VARCHAR(500),
+          ip_address VARCHAR(100),
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
-          FOREIGN KEY (interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE
+          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE
         )
       `);
 
@@ -197,14 +192,13 @@ export class PostgresLoader {
         CREATE TABLE IF NOT EXISTS lldp_neighbors (
           neighbor_id SERIAL PRIMARY KEY,
           node_id INTEGER NOT NULL,
-          interface_id INTEGER NOT NULL,
-          remote_device VARCHAR(500),
-          remote_interface VARCHAR(500),
+          local_port_number INTEGER NOT NULL,
+          remote_system_name VARCHAR(500),
+          remote_port_id VARCHAR(500),
+          remote_port_description VARCHAR(500),
           remote_ip_address VARCHAR(100),
-          remote_platform VARCHAR(500),
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE,
-          FOREIGN KEY (interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE
+          FOREIGN KEY (node_id) REFERENCES devices(node_id) ON DELETE CASCADE
         )
       `);
 
@@ -216,14 +210,13 @@ export class PostgresLoader {
       await client.query('CREATE INDEX IF NOT EXISTS idx_interfaces_name ON interfaces(interface_name)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_node_ip_addresses_node_id ON node_ip_addresses(node_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_node_ip_addresses_ip ON node_ip_addresses(ip_address)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_l2_connections_parent ON l2_connections(parent_node_id, parent_interface_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_l2_connections_child ON l2_connections(child_node_id, child_interface_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_l2_connections_node ON l2_connections(node_id, port_id)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_l2_connections_mac ON l2_connections(mac_address)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_l2_connections_vlan ON l2_connections(vlan_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_cdp_neighbors_node ON cdp_neighbors(node_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_cdp_neighbors_interface ON cdp_neighbors(interface_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_cdp_neighbors_remote_device ON cdp_neighbors(remote_device)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_cdp_neighbors_device ON cdp_neighbors(device_id)');
       await client.query('CREATE INDEX IF NOT EXISTS idx_lldp_neighbors_node ON lldp_neighbors(node_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_lldp_neighbors_interface ON lldp_neighbors(interface_id)');
-      await client.query('CREATE INDEX IF NOT EXISTS idx_lldp_neighbors_remote_device ON lldp_neighbors(remote_device)');
+      await client.query('CREATE INDEX IF NOT EXISTS idx_lldp_neighbors_remote ON lldp_neighbors(remote_system_name)');
 
       await client.query('COMMIT');
       console.log('Tables created successfully');
@@ -478,34 +471,32 @@ export class PostgresLoader {
     const client = await this.pool.connect();
 
     try {
-      console.log(`Loading ${connections.length} L2 connections...`);
+      console.log(`Loading ${connections.length} L2 MAC-to-port mappings...`);
       await client.query('BEGIN');
 
       for (const conn of connections) {
         await client.query(
           `
           INSERT INTO l2_connections (
-            parent_node_id, child_node_id, parent_interface_id,
-            child_interface_id, connection_type, last_updated
+            node_id, port_id, mac_address, vlan_id, status, last_updated
           ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-          ON CONFLICT (parent_interface_id, child_interface_id) DO UPDATE SET
-            parent_node_id = EXCLUDED.parent_node_id,
-            child_node_id = EXCLUDED.child_node_id,
-            connection_type = EXCLUDED.connection_type,
+          ON CONFLICT (node_id, port_id, mac_address) DO UPDATE SET
+            vlan_id = EXCLUDED.vlan_id,
+            status = EXCLUDED.status,
             last_updated = CURRENT_TIMESTAMP
           `,
           [
-            conn.ParentNodeID,
-            conn.ChildNodeID,
-            conn.ParentInterfaceID,
-            conn.ChildInterfaceID,
-            conn.ConnectionType,
+            conn.NodeID,
+            conn.PortID,
+            conn.MACAddress,
+            conn.VlanId,
+            conn.Status,
           ]
         );
       }
 
       await client.query('COMMIT');
-      console.log('L2 connections loaded successfully');
+      console.log('L2 MAC-to-port mappings loaded successfully');
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error loading L2 connections:', error);
@@ -534,18 +525,17 @@ export class PostgresLoader {
         await client.query(
           `
           INSERT INTO cdp_neighbors (
-            node_id, interface_id, remote_device, remote_interface,
-            remote_ip_address, remote_platform, last_updated
-          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+            node_id, if_index, device_id, device_port,
+            ip_address, last_updated
+          ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
           ON CONFLICT (neighbor_id) DO NOTHING
           `,
           [
             entry.NodeID,
-            entry.InterfaceID,
-            entry.RemoteDevice,
-            entry.RemoteInterface,
-            entry.RemoteIPAddress,
-            entry.RemotePlatform,
+            entry.IfIndex,
+            entry.DeviceId,
+            entry.DevicePort,
+            entry.IpAddress,
           ]
         );
       }
@@ -580,18 +570,18 @@ export class PostgresLoader {
         await client.query(
           `
           INSERT INTO lldp_neighbors (
-            node_id, interface_id, remote_device, remote_interface,
-            remote_ip_address, remote_platform, last_updated
+            node_id, local_port_number, remote_system_name, remote_port_id,
+            remote_port_description, remote_ip_address, last_updated
           ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
           ON CONFLICT (neighbor_id) DO NOTHING
           `,
           [
             entry.NodeID,
-            entry.InterfaceID,
-            entry.RemoteDevice,
-            entry.RemoteInterface,
-            entry.RemoteIPAddress,
-            entry.RemotePlatform,
+            entry.LocalPortNumber,
+            entry.RemoteSystemName,
+            entry.RemotePortId,
+            entry.RemotePortDescription,
+            entry.RemoteIpAddress,
           ]
         );
       }

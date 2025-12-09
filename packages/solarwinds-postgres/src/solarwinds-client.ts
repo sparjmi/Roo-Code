@@ -370,20 +370,22 @@ export class SolarWindsClient {
 
   /**
    * Fetch Layer 2 connections from Orion.NodeL2Connections
+   * This table shows MAC addresses seen on switch ports
    */
   async getL2Connections(): Promise<SolarWindsL2Connection[]> {
     try {
       console.log('Fetching L2 connections from Orion.NodeL2Connections...');
       const swql = `
         SELECT
-          ParentNodeID,
-          ChildNodeID,
-          ParentInterfaceID,
-          ChildInterfaceID
+          NodeID,
+          PortID,
+          MACAddress,
+          VlanId,
+          Status
         FROM Orion.NodeL2Connections
       `;
       const results = await this.query<SolarWindsL2Connection>(swql);
-      console.log(`✓ Fetched ${results.length} L2 connections`);
+      console.log(`✓ Fetched ${results.length} L2 MAC-to-port mappings`);
       return results;
     } catch (error) {
       if (axios.isAxiosError(error) && error.response?.status === 400) {
@@ -403,11 +405,10 @@ export class SolarWindsClient {
       const swql = `
         SELECT
           NodeID,
-          InterfaceID,
-          RemoteDevice,
-          RemoteInterface,
-          RemoteIPAddress,
-          RemotePlatform
+          IfIndex,
+          DeviceId,
+          DevicePort,
+          IpAddress
         FROM Orion.NodeCdpEntry
       `;
       const results = await this.query<SolarWindsCdpEntry>(swql);
@@ -431,11 +432,11 @@ export class SolarWindsClient {
       const swql = `
         SELECT
           NodeID,
-          InterfaceID,
-          RemoteDevice,
-          RemoteInterface,
-          RemoteIPAddress,
-          RemotePlatform
+          LocalPortNumber,
+          RemoteSystemName,
+          RemotePortId,
+          RemotePortDescription,
+          RemoteIpAddress
         FROM Orion.NodeLldpEntry
       `;
       const results = await this.query<SolarWindsLldpEntry>(swql);

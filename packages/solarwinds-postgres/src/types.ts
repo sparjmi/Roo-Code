@@ -55,29 +55,28 @@ export interface SolarWindsIPAddress {
 }
 
 export interface SolarWindsL2Connection {
-  ParentNodeID: number;
-  ChildNodeID: number;
-  ParentInterfaceID: number;
-  ChildInterfaceID: number;
-  ConnectionType?: string;
+  NodeID: number;
+  PortID: number;
+  MACAddress: string;
+  VlanId: number;
+  Status: number;
 }
 
 export interface SolarWindsCdpEntry {
   NodeID: number;
-  InterfaceID: number;
-  RemoteDevice: string;
-  RemoteInterface: string;
-  RemoteIPAddress?: string;
-  RemotePlatform?: string;
+  IfIndex: number;
+  DeviceId: string;
+  DevicePort: string;
+  IpAddress: string;
 }
 
 export interface SolarWindsLldpEntry {
   NodeID: number;
-  InterfaceID: number;
-  RemoteDevice: string;
-  RemoteInterface: string;
-  RemoteIPAddress?: string;
-  RemotePlatform?: string;
+  LocalPortNumber: number;
+  RemoteSystemName: string;
+  RemotePortId: string;
+  RemotePortDescription: string;
+  RemoteIpAddress: string;
 }
 
 export interface TopologyData {
