@@ -57,6 +57,33 @@ export class PostgresLoader {
   }
 
   /**
+   * Drop all existing tables (use with caution!)
+   */
+  async dropTables(): Promise<void> {
+    const client = await this.pool.connect();
+
+    try {
+      console.log('Dropping existing tables...');
+      await client.query('BEGIN');
+
+      // Drop in order to respect foreign key constraints
+      await client.query('DROP TABLE IF EXISTS connections CASCADE');
+      await client.query('DROP TABLE IF EXISTS ip_addresses CASCADE');
+      await client.query('DROP TABLE IF EXISTS interfaces CASCADE');
+      await client.query('DROP TABLE IF EXISTS devices CASCADE');
+
+      await client.query('COMMIT');
+      console.log('Tables dropped successfully');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      console.error('Error dropping tables:', error);
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
    * Create tables with proper schema and relationships
    */
   async createTables(): Promise<void> {
@@ -71,18 +98,18 @@ export class PostgresLoader {
       await client.query(`
         CREATE TABLE IF NOT EXISTS devices (
           node_id INTEGER PRIMARY KEY,
-          caption VARCHAR(255),
-          node_name VARCHAR(255),
-          ip_address VARCHAR(50),
-          vendor VARCHAR(255),
-          machine_type VARCHAR(255),
-          location VARCHAR(255),
+          caption VARCHAR(500),
+          node_name VARCHAR(500),
+          ip_address VARCHAR(100),
+          vendor VARCHAR(500),
+          machine_type VARCHAR(500),
+          location VARCHAR(500),
           status INTEGER,
-          status_description VARCHAR(100),
-          object_sub_type VARCHAR(100),
-          ios_version VARCHAR(100),
-          community VARCHAR(255),
-          contact VARCHAR(255),
+          status_description VARCHAR(500),
+          object_sub_type VARCHAR(500),
+          ios_version VARCHAR(500),
+          community VARCHAR(500),
+          contact VARCHAR(500),
           description TEXT,
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -93,13 +120,13 @@ export class PostgresLoader {
         CREATE TABLE IF NOT EXISTS interfaces (
           interface_id INTEGER PRIMARY KEY,
           node_id INTEGER NOT NULL,
-          interface_name VARCHAR(255),
-          caption VARCHAR(255),
-          full_name VARCHAR(500),
+          interface_name VARCHAR(500),
+          caption VARCHAR(500),
+          full_name VARCHAR(1000),
           interface_index INTEGER,
           interface_type INTEGER,
-          interface_type_description VARCHAR(255),
-          physical_address VARCHAR(50),
+          interface_type_description VARCHAR(500),
+          physical_address VARCHAR(100),
           admin_status INTEGER,
           oper_status INTEGER,
           speed BIGINT,
@@ -117,9 +144,9 @@ export class PostgresLoader {
         CREATE TABLE IF NOT EXISTS ip_addresses (
           ip_address_id INTEGER PRIMARY KEY,
           interface_id INTEGER NOT NULL,
-          ip_address VARCHAR(50) NOT NULL,
-          subnet_mask VARCHAR(50),
-          ip_address_type VARCHAR(50),
+          ip_address VARCHAR(100) NOT NULL,
+          subnet_mask VARCHAR(100),
+          ip_address_type VARCHAR(100),
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE
         )
@@ -133,7 +160,7 @@ export class PostgresLoader {
           local_interface_id INTEGER NOT NULL,
           remote_node_id INTEGER,
           remote_interface_id INTEGER NOT NULL,
-          connection_type VARCHAR(50),
+          connection_type VARCHAR(100),
           last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY (local_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,
           FOREIGN KEY (remote_interface_id) REFERENCES interfaces(interface_id) ON DELETE CASCADE,

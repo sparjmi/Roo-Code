@@ -82,6 +82,9 @@ async function syncTopology() {
 
     // Prepare PostgreSQL
     console.log('\n--- Preparing PostgreSQL Database ---');
+
+    // Drop and recreate tables to apply schema changes
+    await postgresLoader.dropTables();
     await postgresLoader.createTables();
 
     // Option to clear existing data
