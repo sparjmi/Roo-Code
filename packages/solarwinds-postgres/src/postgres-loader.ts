@@ -521,27 +521,47 @@ export class PostgresLoader {
       console.log(`Loading ${cdpEntries.length} CDP neighbors...`);
       await client.query('BEGIN');
 
+      let loaded = 0;
+      let skipped = 0;
+
       for (const entry of cdpEntries) {
-        await client.query(
-          `
-          INSERT INTO cdp_neighbors (
-            node_id, if_index, device_id, device_port,
-            ip_address, last_updated
-          ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-          ON CONFLICT (neighbor_id) DO NOTHING
-          `,
-          [
-            entry.NodeID,
-            entry.IfIndex,
-            entry.DeviceId,
-            entry.DevicePort,
-            entry.IpAddress,
-          ]
-        );
+        try {
+          // Sanitize strings to remove null bytes which PostgreSQL UTF8 doesn't support
+          const sanitize = (str: string | null | undefined): string | null => {
+            if (!str) return null;
+            return str.replace(/\0/g, ''); // Remove null bytes
+          };
+
+          await client.query(
+            `
+            INSERT INTO cdp_neighbors (
+              node_id, if_index, device_id, device_port,
+              ip_address, last_updated
+            ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
+            ON CONFLICT (neighbor_id) DO NOTHING
+            `,
+            [
+              entry.NodeID,
+              entry.IfIndex,
+              sanitize(entry.DeviceId),
+              sanitize(entry.DevicePort),
+              sanitize(entry.IpAddress),
+            ]
+          );
+          loaded++;
+        } catch (error: any) {
+          // Skip entries that still cause encoding issues
+          if (error.code === '22021') {
+            skipped++;
+            console.warn(`Skipped CDP entry for node ${entry.NodeID} due to encoding issue`);
+          } else {
+            throw error;
+          }
+        }
       }
 
       await client.query('COMMIT');
-      console.log('CDP neighbors loaded successfully');
+      console.log(`CDP neighbors loaded successfully (${loaded} loaded, ${skipped} skipped)`);
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error loading CDP neighbors:', error);
@@ -566,28 +586,48 @@ export class PostgresLoader {
       console.log(`Loading ${lldpEntries.length} LLDP neighbors...`);
       await client.query('BEGIN');
 
+      let loaded = 0;
+      let skipped = 0;
+
       for (const entry of lldpEntries) {
-        await client.query(
-          `
-          INSERT INTO lldp_neighbors (
-            node_id, local_port_number, remote_system_name, remote_port_id,
-            remote_port_description, remote_ip_address, last_updated
-          ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
-          ON CONFLICT (neighbor_id) DO NOTHING
-          `,
-          [
-            entry.NodeID,
-            entry.LocalPortNumber,
-            entry.RemoteSystemName,
-            entry.RemotePortId,
-            entry.RemotePortDescription,
-            entry.RemoteIpAddress,
-          ]
-        );
+        try {
+          // Sanitize strings to remove null bytes which PostgreSQL UTF8 doesn't support
+          const sanitize = (str: string | null | undefined): string | null => {
+            if (!str) return null;
+            return str.replace(/\0/g, ''); // Remove null bytes
+          };
+
+          await client.query(
+            `
+            INSERT INTO lldp_neighbors (
+              node_id, local_port_number, remote_system_name, remote_port_id,
+              remote_port_description, remote_ip_address, last_updated
+            ) VALUES ($1, $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+            ON CONFLICT (neighbor_id) DO NOTHING
+            `,
+            [
+              entry.NodeID,
+              entry.LocalPortNumber,
+              sanitize(entry.RemoteSystemName),
+              sanitize(entry.RemotePortId),
+              sanitize(entry.RemotePortDescription),
+              sanitize(entry.RemoteIpAddress),
+            ]
+          );
+          loaded++;
+        } catch (error: any) {
+          // Skip entries that still cause encoding issues
+          if (error.code === '22021') {
+            skipped++;
+            console.warn(`Skipped LLDP entry for node ${entry.NodeID} due to encoding issue`);
+          } else {
+            throw error;
+          }
+        }
       }
 
       await client.query('COMMIT');
-      console.log('LLDP neighbors loaded successfully');
+      console.log(`LLDP neighbors loaded successfully (${loaded} loaded, ${skipped} skipped)`);
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error loading LLDP neighbors:', error);
