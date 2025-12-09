@@ -1,0 +1,23 @@
+{
+  "name": "@roo-code/solarwinds-postgres",
+  "version": "1.0.0",
+  "description": "SolarWinds NPM to PostgreSQL network topology integration",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.1",
+    "axios": "^1.7.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.1.0",
+    "@types/pg": "^8.11.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.4.5"
+  }
+}
