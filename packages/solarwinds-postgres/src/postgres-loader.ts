@@ -422,25 +422,41 @@ export class PostgresLoader {
       console.log(`Loading ${ipAddresses.length} node IP addresses...`);
       await client.query('BEGIN');
 
+      let loaded = 0;
+      let skipped = 0;
+
       for (const ip of ipAddresses) {
-        await client.query(
-          `
-          INSERT INTO node_ip_addresses (
-            node_id, ip_address, ip_address_n, subnet_mask,
-            ip_address_type, last_updated
-          ) VALUES ($1, $2, $3, $4, $5, CURRENT_TIMESTAMP)
-          ON CONFLICT (node_id, ip_address) DO UPDATE SET
-            ip_address_n = EXCLUDED.ip_address_n,
-            subnet_mask = EXCLUDED.subnet_mask,
-            ip_address_type = EXCLUDED.ip_address_type,
-            last_updated = CURRENT_TIMESTAMP
-          `,
-          [ip.NodeID, ip.IPAddress, ip.IPAddressN, ip.SubnetMask, ip.IPAddressType]
-        );
+        try {
+          // Only insert if the node_id exists in devices table
+          await client.query(
+            `
+            INSERT INTO node_ip_addresses (
+              node_id, ip_address, ip_address_n, subnet_mask,
+              ip_address_type, last_updated
+            )
+            SELECT $1, $2, $3, $4, $5, CURRENT_TIMESTAMP
+            WHERE EXISTS (SELECT 1 FROM devices WHERE node_id = $1)
+            ON CONFLICT (node_id, ip_address) DO UPDATE SET
+              ip_address_n = EXCLUDED.ip_address_n,
+              subnet_mask = EXCLUDED.subnet_mask,
+              ip_address_type = EXCLUDED.ip_address_type,
+              last_updated = CURRENT_TIMESTAMP
+            `,
+            [ip.NodeID, ip.IPAddress, ip.IPAddressN, ip.SubnetMask, ip.IPAddressType]
+          );
+          loaded++;
+        } catch (error: any) {
+          // Skip IP addresses for nodes that don't exist
+          if (error.code === '23503') {
+            skipped++;
+          } else {
+            throw error;
+          }
+        }
       }
 
       await client.query('COMMIT');
-      console.log('Node IP addresses loaded successfully');
+      console.log(`Node IP addresses loaded successfully (${loaded} loaded, ${skipped} skipped orphaned)`);
     } catch (error) {
       await client.query('ROLLBACK');
       console.error('Error loading node IP addresses:', error);
